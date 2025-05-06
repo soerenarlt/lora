@@ -1,0 +1,73 @@
+ERROR: Unable to locate a modulefile for 'anaconda/2024'
+/var/spool/slurmd/job17828938/slurm_script: line 16: conda: command not found
+/var/spool/slurmd/job17828938/slurm_script: line 17: conda: command not found
+[2025-05-06 16:44:40,455] torch.distributed.run: [WARNING] 
+[2025-05-06 16:44:40,455] torch.distributed.run: [WARNING] *****************************************
+[2025-05-06 16:44:40,455] torch.distributed.run: [WARNING] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+[2025-05-06 16:44:40,455] torch.distributed.run: [WARNING] *****************************************
+Traceback (most recent call last):
+  File "/raven/u/sarlt/lora/finetune.py", line 6, in <module>
+    from peft import LoraConfig, get_peft_model
+ModuleNotFoundError: No module named 'peft'
+Traceback (most recent call last):
+  File "/raven/u/sarlt/lora/finetune.py", line 6, in <module>
+    from peft import LoraConfig, get_peft_model
+ModuleNotFoundError: No module named 'peft'
+Traceback (most recent call last):
+  File "/raven/u/sarlt/lora/finetune.py", line 6, in <module>
+    from peft import LoraConfig, get_peft_model
+ModuleNotFoundError: No module named 'peft'
+Traceback (most recent call last):
+  File "/raven/u/sarlt/lora/finetune.py", line 6, in <module>
+    from peft import LoraConfig, get_peft_model
+ModuleNotFoundError: No module named 'peft'
+[2025-05-06 16:44:50,485] torch.distributed.elastic.multiprocessing.api: [ERROR] failed (exitcode: 1) local_rank: 0 (pid: 78631) of binary: /mpcdf/soft/SLE_15/packages/x86_64/anaconda/3/2023.03/bin/python
+Traceback (most recent call last):
+  File "/u/sarlt/.local/bin/torchrun", line 8, in <module>
+    sys.exit(main())
+  File "/u/sarlt/.local/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 346, in wrapper
+    return f(*args, **kwargs)
+  File "/u/sarlt/.local/lib/python3.10/site-packages/torch/distributed/run.py", line 806, in main
+    run(args)
+  File "/u/sarlt/.local/lib/python3.10/site-packages/torch/distributed/run.py", line 797, in run
+    elastic_launch(
+  File "/u/sarlt/.local/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 134, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/u/sarlt/.local/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 264, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+finetune.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2025-05-06_16:44:50
+  host      : ravg1032.hpc.mpcdf.mpg.de
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 78632)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2025-05-06_16:44:50
+  host      : ravg1032.hpc.mpcdf.mpg.de
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 78633)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2025-05-06_16:44:50
+  host      : ravg1032.hpc.mpcdf.mpg.de
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 78634)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-05-06_16:44:50
+  host      : ravg1032.hpc.mpcdf.mpg.de
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 78631)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
