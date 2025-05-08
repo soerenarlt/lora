@@ -24,6 +24,7 @@ def detokenize_indices(indices):
 
 if __name__ == "__main__":
     for i in range(99):
+        print(f"Processing file {i}...")
 
         with h5py.File(f'data/split_data_{i}.h5', 'r') as f:
             
@@ -31,9 +32,11 @@ if __name__ == "__main__":
             out_path = f'data/processed_data_{i}.json'
             
             with open(out_path, "w", encoding="utf‑8") as out:
-                for i in range(num_samples):
-                    code_inds = f['code'][i]
-                    state_inds = f['state'][i]
+                for j in range(num_samples):
+                    if j % 100000 == 0:
+                        print(f"Processing sample {j}...")
+                    code_inds = f['code'][j]
+                    state_inds = f['state'][j]
 
 
                     # Detokenize the indices
@@ -41,8 +44,8 @@ if __name__ == "__main__":
                     state_str2 = detokenize_indices(state_inds)[5:-5]
 
 
-                    print(code_str1)
-                    print(state_str2)
+                    # print(code_str1)
+                    # print(state_str2)
 
                     llama_string = '<|begin_of_text|>'+'<|start_header_id|>{quantum state}<|end_header_id|>'+state_str2+'<|start_header_id|>{code}<|end_header_id|>'+code_str1+'<|end_of_text|>'
                     out.write(json.dumps({"text": llama_string}) + "\n")
