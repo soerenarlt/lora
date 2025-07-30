@@ -1,22 +1,22 @@
 #!/bin/bash -l
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:a100:4
+#SBATCH --partition=gpudev
+#SBATCH --gres=gpu:a100:1
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=72
-#SBATCH --mem=250G
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=18
+#SBATCH --mem=125G
+#SBATCH --time=00:15:00
 #SBATCH -o jobfiles/out.%j
 #SBATCH -e jobfiles/err.%j
 #SBATCH -D /raven/u/sarlt/lora           # project directory
-#SBATCH -J lora-ft
+#SBATCH -J predict
 
 export PYTHONNOUSERSITE=1
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export NCCL_ASYNC_ERROR_HANDLING=1
 
 module purge
-module load anaconda/3/2023.03
+module load anaconda/3/2023.03           # Python‑3.10
 module load gcc/12
 module load cuda/12.1
 module load openmpi_gpu/4.1
@@ -50,5 +50,5 @@ echo "---------------------------------------------------------------"
 python -m torch.distributed.run \
        --standalone \
        --nnodes 1 \
-       --nproc_per_node 4 \
-       finetune.py
+       --nproc_per_node 1 \
+       predict.py

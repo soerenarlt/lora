@@ -54,10 +54,10 @@ def write_shard(records: List[Dict[str, object]], out_path: pathlib.Path):
 def main():
     
 
-    input_glob = 'data/processed_data_0.json'
-    output_dir = 'tok_data'
+    input_glob = 'data/processed_data_*.json'
+    output_dir = 'data_tok'
     model_id = 'Meta-Llama-3-8B'
-    shard_size = 1_000_0
+    shard_size = 1000_000
 
     paths = sorted(glob.glob(input_glob))
     if not paths:
@@ -76,7 +76,7 @@ def main():
         ids = tokenizer.encode(text, add_special_tokens=False)
         # shard.append({"input_ids": ids})
         shard.append({"input_ids": ids, "labels": ids})
-        all_lens.append(len(ids))
+        # all_lens.append(len(ids))
 
 
         if len(shard) >= shard_size:
@@ -90,18 +90,18 @@ def main():
         out_name = pathlib.Path(output_dir) / f"shard_{shard_idx:05d}.parquet"
         write_shard(shard, out_name)
 
-    # --------- Histogram stats --------
-    bins = np.arange(0, max(all_lens) + 100, 100)
-    plt.figure(figsize=(10, 6))
-    plt.hist(all_lens, bins=bins, alpha=0.85)
-    plt.title("Tokens per sample")
-    plt.xlabel("Sequence length (tokens)")
-    plt.ylabel("# samples")
-    plt.grid(True, ls="--", linewidth=0.3)
-    hist_path = pathlib.Path(output_dir) / "hist_tokens_per_sample.png"
-    plt.savefig(hist_path, dpi=150)
-    print(f"\nTokenised dataset ready in {output_dir}")
-    print(f"Histogram saved to {hist_path}")
+    # # --------- Histogram stats --------
+    # bins = np.arange(0, max(all_lens) + 100, 100)
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(all_lens, bins=bins, alpha=0.85)
+    # plt.title("Tokens per sample")
+    # plt.xlabel("Sequence length (tokens)")
+    # plt.ylabel("# samples")
+    # plt.grid(True, ls="--", linewidth=0.3)
+    # hist_path = pathlib.Path(output_dir) / "hist_tokens_per_sample.png"
+    # plt.savefig(hist_path, dpi=150)
+    # print(f"\nTokenised dataset ready in {output_dir}")
+    # print(f"Histogram saved to {hist_path}")
 
 def visualize_tokenization(tok_data = 'tok_data/shard_00000.parquet', idx=0, model_id = 'Meta-Llama-3-8B'):
     """Visualize the tokenization of a sample from the tokenized dataset."""

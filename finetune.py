@@ -1,34 +1,38 @@
 #!/usr/bin/env python
 import torch, os, json, glob, math
-from transformers import (
-    AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, TrainingArguments, TrainerCallback
-)
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TrainingArguments, TrainerCallback
 from peft import LoraConfig, get_peft_model
-from datasets import load_dataset, Dataset, Features, Value
+from datasets import load_dataset
 from trl import SFTTrainer
 
+import bitsandbytes as bnb, inspect, os
+print("bnb version:", bnb.__version__)
+print("package dir :", os.path.dirname(inspect.getfile(bnb)))
 
 MODEL_ID = "Meta-Llama-3-8B"
-os.environ["WANDB_PROJECT"] = "metadesign-llama"  # name your W&B project
-os.environ["WANDB_LOG_MODEL"] = "checkpoint"  # log all model checkpoints
+OUTDIR = "out_fast_16_5"
+last_ckpt = "out_fast_16_4/checkpoint-20000_nostate" 
+parquet_path = "data_tok"
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True)
-tokenizer.pad_token = tokenizer.eos_token        # needed for packing
+local_rank = int(os.environ.get("LOCAL_RANK", 0))
+if local_rank == 0:
+    job_num = os.environ.get("SLURM_JOB_ID", "default")
+    script_path = os.path.realpath(__file__)
+    dest_path = os.path.join("jobfiles", f"script.{job_num}")
+    with open(script_path, "rt") as src, open(dest_path, "wt") as dst:
+        dst.write(src.read())
+
 
 # --- tokenised dataset ------------------------------------------------------
-parquet_path = "tok_data"          # output_dir you passed to the script
-
 dataset = load_dataset(
             "parquet",
-            data_files=f"{parquet_path}/shard_00000.parquet",
+            data_files=f"{parquet_path}/*.parquet",
             split="train",
-            keep_in_memory=True        # pulls straight from page-cache → fast
+            keep_in_memory=False,        # pulls straight from page-cache → fast
+            # streaming=True,
           )
-
-# dataset already contains 'input_ids' and 'labels' columns
-dataset = dataset.remove_columns([col for col in dataset.column_names if col != "input_ids" and col != "labels"])
-
-
+dataset = dataset.remove_columns([col for col in dataset.column_names if col != 'input_ids' and col != 'labels'])
+                                  
 # --- QLoRA ------------------------------------------------------------------
 bnb_cfg = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -64,28 +68,27 @@ model = get_peft_model(model, lora_cfg)
 
 # DDP duplicate-ready fix
 model.enable_input_require_grads()
-
-
 model.print_trainable_parameters()
 
 # --- training args ----------------------------------------------------------
 args = TrainingArguments(
-        output_dir="out",
+        output_dir=OUTDIR,
         bf16=True,                          # A100 loves bf16
-        per_device_train_batch_size=2,      # 2×8192×4 ≈ 64 k tokens / step
-        gradient_accumulation_steps=16,     # effective 1 M tokens / step
-        max_steps=5_000,                    # ≈ 3 B tokens in 24 h
+        per_device_train_batch_size=1,      
+        gradient_accumulation_steps=16,     
+        max_steps=100_000,                    
         learning_rate=2e-4,
         warmup_ratio=0.03,
         lr_scheduler_type="cosine",
         logging_steps=10,
-        save_steps=1_000,
+        save_steps=500,
         save_total_limit=3,
         gradient_checkpointing=True,
-        # ddp_static_graph=True,         
         ddp_find_unused_parameters=False,  # (implicit with static graph but safe)
-        optim="paged_adamw_8bit",
+        # optim="paged_adamw_8bit",
+        optim="adamw_torch",
         # deepspeed="ds_z3_config.json",      # optional (see below)
+        dataloader_num_workers=72,
         report_to="none",
 )
 
@@ -93,10 +96,10 @@ trainer = SFTTrainer(
     model=model,
     args=args,
     train_dataset=dataset,
-    tokenizer=tokenizer,
-    dataset_text_field=None,
+    dataset_text_field='input_ids',
     max_seq_length=2*4096,
     packing=True,
+    optimizers=(None, None)       # <-- force a fresh AdamW
 )
 
 if isinstance(trainer.model, torch.nn.parallel.DistributedDataParallel):
@@ -114,8 +117,7 @@ class MemPrint(TrainerCallback):
 trainer.add_callback(MemPrint())
 
 print("Training...")
-trainer.train()
+trainer.train(resume_from_checkpoint=last_ckpt)
 print("Done.")
-trainer.save_model("out/final_adapter")
-print("Model saved to out/final_adapter")
-tokenizer.save_pretrained("out/")
+trainer.save_model(f'{OUTDIR}/final_adapter')
+print(f'Model saved to {OUTDIR}/final_adapter')
