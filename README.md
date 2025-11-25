@@ -96,8 +96,6 @@ python finetune.py
 - Labels mirror input_ids for standard next-token causal loss.
 - Packing groups multiple sequences per training example for efficiency.
 
-This file: `readme_train.md` provides the minimal reproducible path from raw indices to a trained adapter.
-
 
 ### predict/sample
-`sample.py` loads the fine-tuned adapter, samples code for auto-generated quantum states, and logs fidelities plus decoded code snippets into `sample_results/` for inspection.
+`sample.py` loads the fine-tuned adapter, samples code for target quantum states, and logs fidelities plus decoded code snippets into `sample_results/`.
