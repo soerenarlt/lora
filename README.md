@@ -1,63 +1,4 @@
-# LoRa fine tuning ON RAVEN
-
-## Info about model size and training
-
-
-### Full precision, no LoRa ➡️ too large
-* We use Meta-Llama-3-8B, which in its original precision (BF16) takes 15.1GB alone to store the models weights
-
-___
-
-| -                              | What is stored            | Bytes / param        | # params (≈)                     | Memory (GB)  | Notes                                                             |
-| ------------------------------ | ------------------------- | -------------------- | -------------------------------- | ------------ | ----------------------------------------------------------------- |
-| **Original release**       | BF16 weights              | 2                    | **8.1 B**                        | **15.1 GB**  | Official HF files are all BF16 tensors                            |
- 
- * We can compute the GPU memory necessary for one training step given a batch size `N`, by accounting for the different necessary components.
-
-| Component                                            | Size                                                                                          |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Weights                                              | 15.1 GB                                                                                       |
-| Gradients (same dtype)                               | 15.1 GB                                                                                       |
-| Adam first & second moments (FP32 → 8 bytes / param) | 60.5 GB                                                                                       |
-| **Static total (before activations)**                | **90.7 GB**                                                                                   |
-| Activations per step                                 | 1.5 GB × `N`  where `N` = packed-sequence batch (≈ 8192 tokens each, gradient-checkpointing on) |
-
-___
-
-➡️ We see that the model is too large to perform one training step on one 40GB GPU. We would have to split the model into multiple GPUs, introducing additional overhead that we want to avoid.
-
-
-### QLoRA
-* LoRA (Low Rank Adaptation) is a popular finetuning technique that significantly reduces the computational requirements
-* with LoRA we only train a small fraction (here 2.5%) of the total number of parameters and keep the rest frozen
-* QLoRA expands upon LoRA by saving the frozen weights in a lower precision than the original BF16.
-* This decreases the necessary storage for the model weights to about 4.7GB 
-
-___
-
-| -                              | What is stored            | Bytes / param        | # params (≈)                     | Memory (GB)  | Notes                                                             |
-| ------------------------------ | ------------------------- | -------------------- | -------------------------------- | ------------ | ----------------------------------------------------------------- |
-| **QLoRA base weights**     | 4-bit NF4 + double-quant. | 0.5 (+≈8 % overhead) | 8.1 B                            | **≈ 4.3 GB** | 4× compression relative to 16-bit ([arXiv][1], [Hugging Face][2]) |
-| **LoRA adapters (r = 64)** | BF16 A & B matrices       | 2                    | **≈ 0.203 B** (≈ 2.5 % of model) | **0.41 GB**  | Targets: {q,k,v,o, gate, up, down} in all 36 transformer blocks   |
-
-[1]: https://arxiv.org/abs/2305.14314?utm_source=chatgpt.com "QLoRA: Efficient Finetuning of Quantized LLMs"
-[2]: https://huggingface.co/blog/4bit-transformers-bitsandbytes?utm_source=chatgpt.com "Making LLMs even more accessible with bitsandbytes, 4-bit ..."
-___
-
-* The biggest memory saving comes from having to only save a fraction (2.5%) of the gradients and Adama state.
-
-___
-| Component                                  | Size         |
-| ------------------------------------------ | ------------ |
-| 4-bit frozen backbone                      | 4.3 GB       |
-| LoRA weights (BF16)                        | 0.41 GB      |
-| LoRA grads (BF16)                          | 0.41 GB      |
-| PagedAdam-8-bit states (≈ 2 bytes / param) | 0.41 GB      |
-| **Static total**                           | **5.5 GB**   |
-| Activations                                | 1.5 GB × `N` |
-___
-
-The model can now be trained without having to be split into multiple GPUs.
+# LoRa fine tuning
 
 ## RUNNING THE CODE
 
@@ -75,24 +16,88 @@ huggingface-cli login
 huggingface-cli download meta-llama/Meta-Llama-3-8B --include "*.safetensors" --local-dir Meta-Llama-3-8B
 ```
 
-### process data
-for infos on llama3 special tokens: https://www.llama.com/docs/model-cards-and-prompt-formats/meta-llama-3/
+# Training Pipeline Overview
 
+This repository’s training flow consists of three sequential stages converting raw token-indexed HDF5 data into a LoRA‑fine‑tuned adapter for `Meta-Llama-3-8B`.
 
-1. starting from original training data (pretokenized with hand-writen vocabulary)
-2. `data_processing.py` (detokenizing data, modify sequence to llama format, store as raw text in jsonl format)
-3. `pretokenize.py` (tokenize raw text and store as parquet files)
+## 1. HDF5 → JSON (data_processing.py)
+Input: `data/split_data_*.h5` each containing `code` and `state` datasets (arrays of token indices) plus `tok.json` (token→id map).
+Process:
+- Load token indices and detokenize via reverse map (drops `<PAD>`).
+- Trim leading/trailing 5 chars (`[5:-5]`) from each decoded segment (dataset-specific heuristic).
+- Wrap into Llama3 chat-style format:
+  `<|begin_of_text|><|start_header_id|>{quantum state}<|end_header_id|>STATE<|start_header_id|>{code}<|end_header_id|>CODE<|end_of_text|>`
+Output: `data/processed_data_{i}.json` lines of `{"text": ...}` for i=0..98 (adjust loop as needed).
 
-or download  (todo)
-
-
-
-### train
-train on four parallel A100-40GB
+Run:
+```bash
+python data_processing.py
 ```
-sbatch finetune
+
+## 2. JSON → Tokenised Parquet (pretokenize.py)
+Input: `data/processed_data_*.json`.
+Process:
+- Stream all JSON/JSONL lines; extract `text`.
+- Tokenize with `AutoTokenizer.from_pretrained('Meta-Llama-3-8B')` (fast tokenizer, `pad_token = eos_token`).
+- Build shards of size 1,000,000 examples (configurable) containing columns: `input_ids`, `labels` (labels identical to input_ids for causal LM).
+- Write compressed Parquet (`zstd`) into `data_tok/shard_*.parquet`.
+Output: Parquet shards ready for streaming / memory‑efficient training.
+
+Run:
+```bash
+python pretokenize.py
 ```
-(training code in `finetune.py`)
+(Optional) Inspect a shard with `visualize_tokenization()` to see per-token decoding.
+
+## 3. LoRA Finetuning (finetune.py)
+Input: `data_tok/*.parquet`.
+Model & Quantization:
+- Base model: `Meta-Llama-3-8B` loaded in 4-bit (nf4 + double quant, bfloat16 compute) via bitsandbytes.
+LoRA Config:
+- Rank r=64, alpha=128, dropout=0.05 targeting proj & MLP modules (`q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj`).
+Trainer Setup:
+- Uses `SFTTrainer` with packing, `max_seq_length=8192` (2*4096), batch size 1 × grad accumulation 16.
+- Optimizer: `adamw_torch` (explicit override).
+- Checkpoint resume: `out_fast_16_4/checkpoint-20000_nostate`.
+- Saves every 500 steps, keeps last 3.
+- Final adapter saved to `out_fast_16_5/final_adapter`.
+
+Run:
+```bash
+python finetune.py
+```
+(Distributed training: environment must provide `LOCAL_RANK`; script handles DDP static graph & memory print callbacks.)
+
+## Quick End-to-End
+```bash
+# 1. Convert HDF5 splits to JSON
+python data_processing.py
+
+# 2. Tokenize into Parquet shards
+python pretokenize.py
+
+# 3. Finetune with QLoRA + LoRA
+python finetune.py
+```
+
+## Adjusting Common Parameters
+- Change shard size: edit `shard_size` in `pretokenize.py`.
+- Change model: update `MODEL_ID` in `finetune.py` and `model_id` in `pretokenize.py`.
+- Change output directories: `output_dir` in scripts (`OUTDIR`, `output_dir`).
+- Resume from different checkpoint: modify `last_ckpt` in `finetune.py` or set to `None` for fresh start.
+
+## Outputs Summary
+- Intermediate JSON: `data/processed_data_*.json`
+- Tokenised shards: `data_tok/shard_*.parquet`
+- LoRA adapter: `out_fast_16_5/final_adapter`
+
+## Notes
+- Trimming `[5:-5]` is dataset-specific; verify necessity before removing.
+- Labels mirror input_ids for standard next-token causal loss.
+- Packing groups multiple sequences per training example for efficiency.
+
+This file: `readme_train.md` provides the minimal reproducible path from raw indices to a trained adapter.
+
 
 ### predict/sample
-todo (but see `predict.py` for now)
+`sample.py` loads the fine-tuned adapter, samples code for auto-generated quantum states, and logs fidelities plus decoded code snippets into `sample_results/` for inspection.
